@@ -3,61 +3,68 @@ package main
 import (
 	"fmt"
 	"github.com/heck-go/heck"
+	"net/http"
 )
 
+func LogMiddleware(ctx *heck.Context) {
+	fmt.Println("Method:", ctx.Method(), "Path:", ctx.Path())
+	ctx.After(func(ctx *heck.Context) {
+		fmt.Println("Finished")
+	})
+	ctx.OnException(func(ctx *heck.Context, err interface{}, trace interface{}) {
+		fmt.Println("Exception: ", err)
+	})
+}
+
 func main() {
-	server := heck.NewServer(":15000")
+	mux := heck.New().Before(LogMiddleware)
 	
 	// Basic GET method and response with interceptors
-	server.GetFor("/api/hello", func(ctx *heck.Context) {
-		ctx.Response = &heck.Response{
-			StatusCode: 200,
-			Value:      "Hello stranger!",
-		}
-	}, nil).Before(func(ctx *heck.Context) {
-		fmt.Println("Received route: ", ctx.Method())
-		ctx.Before(func(ctx *heck.Context) {
-			fmt.Println("Path: ", ctx.Path())
-		})
-	})
+	mux.GetFor("/api/hello", nil, func(ctx *heck.Context) {
+		ctx.WriteString(200,
+			"Hello stranger!")
+	}).Before(LogMiddleware)
 	
 	// Variable path parameters
-	server.GetFor("/api/hello/:name", func(ctx *heck.Context) {
+	mux.GetFor("/api/hello/:name", nil, func(ctx *heck.Context) {
 		name, _ := ctx.PathParams.Get("name")
-		ctx.Response = &heck.Response{
-			StatusCode: 200,
-			Value:      "Hello " + name + "!",
-		}
-	}, nil)
+		ctx.WriteString(200, "Hello " + name + "!")
+	})
 	
 	// Query parameters
-	server.GetFor("/api/math/add", func(ctx *heck.Context) {
+	mux.GetFor("/api/math/add", nil, func(ctx *heck.Context) {
 		a, _, _ := ctx.Query.Int("a")
 		b, _, _ := ctx.Query.Int("b")
-		ctx.Response = &heck.Response{
-			StatusCode: 200,
-			Value:      a + b,
-		}
-	}, nil)
+		ctx.WriteString(200, a + b)
+	})
 	
 	// Query parameters
-	server.Pos("/api/json/math/add", func(ctx *heck.Context) {
+	mux.GetFor("/api/math/all", nil, func(ctx *heck.Context) {
+		a, _, _ := ctx.Query.Int("a")
+		b, _, _ := ctx.Query.Int("b")
+		input := MathInput{A: a, B: b}
+		_ = ctx.WriteJSON(200, input.All())
+	})
+	
+	// Query parameters
+	mux.PostFor("/api/json/math/add", nil, func(ctx *heck.Context) {
 		input := MathInput{}
 		err := ctx.BodyAsJson(&input)
 		if err != nil {
-			ctx.Response = &heck.Response{
-				StatusCode: 401,
-				Value:      "Invalid request!" + err.Error(),
-			}
+			ctx.WriteString(401,
+				"Invalid request!" + err.Error())
 			return
 		}
-		ctx.Response = &heck.Response{
-			StatusCode: 200,
-			Value:      input.A + input.B,
-		}
-	}, nil)
+		ctx.WriteString(200,
+			input.Add())
+	})
 	
-	if err := server.Start(); err != nil {
+	server := &http.Server{
+		Addr: ":15000",
+		Handler: mux,
+	}
+	
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		panic(err)
 	}
 }
@@ -65,4 +72,29 @@ func main() {
 type MathInput struct {
 	A int
 	B int
+}
+
+func (self *MathInput) Add() int {
+	return self.A + self.B
+}
+
+func (self *MathInput) Sub() int {
+	return self.A - self.B
+}
+
+func (self *MathInput) Mul() int {
+	return self.A * self.B
+}
+
+func (self *MathInput) Mod() int {
+	return self.A % self.B
+}
+
+func (self *MathInput) All() map[string]interface{} {
+	return map[string]interface{}{
+		"Addition": self.Add(),
+		"Subtraction": self.Add(),
+		"Multiplication": self.Mul(),
+		"Modulo": self.Mod(),
+	}
 }
